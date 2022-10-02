@@ -1,9 +1,9 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreatePostDto {
   @IsString()
   @IsNotEmpty()
-  author: string;
+  authorId: string;
 
   @IsString()
   @IsNotEmpty()
@@ -13,8 +13,7 @@ export class CreatePostDto {
   @IsOptional()
   musicId: string;
 
-  // @IsFile()
-  media: any;
-
-  isPrivate = false;
+  @IsBoolean()
+  @IsOptional()
+  isPrivate: boolean;
 }

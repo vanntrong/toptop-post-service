@@ -1,13 +1,21 @@
 import { uploadCloud } from '@/common/helper/cloudinary.helper';
+import { toPostResponse } from '@/common/helper/utils.helper';
 import { AppError } from '@/errors/AppError';
 import { Logger } from '@/loaders/logger/loggerLoader';
 import { Hashtag, Music, Post } from '@/models';
 import { BaseQuery } from '@/types/common';
-import { ForbiddenException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  ForbiddenException,
+  HttpStatus,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as ffmpeg from 'fluent-ffmpeg';
 import * as fs from 'fs';
 import { omit } from 'lodash';
+import { firstValueFrom } from 'rxjs';
 import { Repository } from 'typeorm';
 import { CreatePostDto } from './post.dto';
 
@@ -18,7 +26,10 @@ export class PostService {
     @InjectRepository(Post) private postRepository: Repository<Post>,
     @InjectRepository(Hashtag) private hashtagRepository: Repository<Hashtag>,
     @InjectRepository(Music) private musicRepository: Repository<Music>,
-  ) {}
+    @Inject('USERS_SERVICE') private usersClient: ClientProxy,
+  ) {
+    this.usersClient.connect();
+  }
 
   getHashtags(content: string) {
     const regexHashtag = /\B(\#[a-zA-Z]+\b)(?!;)/g;
@@ -96,17 +107,21 @@ export class PostService {
     mediaPath: { path: string; name: string },
   ) {
     try {
-      if (userId !== body.author) {
+      if (userId !== body.authorId) {
         throw new ForbiddenException(
           'You are not allowed to create a post for another user',
         );
       }
 
-      // const user = await this.userRepository.findOneBy({ id: userId });
+      const user = await firstValueFrom(
+        this.usersClient.send('get_user', {
+          id: body.authorId,
+        }),
+      );
 
-      // if (!user) {
-      //   throw new ForbiddenException('User not found');
-      // }
+      if (!user) {
+        throw new AppError('User not found', HttpStatus.NOT_FOUND);
+      }
 
       const hashtags = await Promise.all(this.getHashtags(body.content));
 
@@ -115,7 +130,7 @@ export class PostService {
         const dataVideo = (await this.uploadVideo(mediaPath.path)) as any;
 
         const newMusic = this.musicRepository.create({
-          // name: `song-${user.name}`,
+          name: `song-${user.name}`,
           song: data.secure_url,
         });
 
@@ -123,7 +138,7 @@ export class PostService {
 
         const newPost = this.postRepository.create({
           ...body,
-          // author: user,
+          authorId: body.authorId,
           media: dataVideo.secure_url,
           music: musicSaved,
           hashtags: hashtags,
@@ -137,7 +152,7 @@ export class PostService {
         );
 
         return {
-          // data: { ...postSaved, author: toUserResponse(user) },
+          data: { ...postSaved, author: user },
         };
       } else {
         const music = await this.musicRepository.findOneBy({
@@ -155,7 +170,7 @@ export class PostService {
 
         const post = this.postRepository.create({
           ...omit(body, ['musicId', 'media']),
-          // author: user,
+          authorId: body.authorId,
           music: music,
           media: result.secure_url,
           hashtags,
@@ -168,7 +183,7 @@ export class PostService {
         this.logger.log('Post created successfully', JSON.stringify(body));
 
         return {
-          // data: { ...postSaved, author: toUserResponse(user) },
+          data: { ...toPostResponse(postSaved), author: user },
         };
       }
     } catch (error) {
@@ -181,7 +196,6 @@ export class PostService {
     try {
       const qp = this.postRepository
         .createQueryBuilder('post')
-        .leftJoinAndSelect('post.author', 'users')
         .leftJoinAndSelect('post.hashtags', 'hashtags')
         .leftJoinAndSelect('post.music', 'music')
         .where(filter);
@@ -194,21 +208,50 @@ export class PostService {
         qp.orderBy(query.sort_by, query.sort_order || 'DESC');
       }
 
-      const posts = await qp
+      let posts: Array<any> = await qp
         .skip((query.page - 1) * query.per_page)
         .take(query.per_page)
         .getMany();
+
+      posts = await Promise.all(
+        posts.map(async (post) => ({
+          ...post,
+          author: await firstValueFrom(
+            this.usersClient.send('get_user', { id: post.authorId }),
+          ),
+        })),
+      );
 
       const total = await qp.getCount();
 
       this.logger.log('Get all posts successfully', JSON.stringify(query));
 
       return {
-        items: posts.map((post) => ({
-          ...post,
-          // author: toUserResponse(post.author, ['id', 'name', 'username']),
-        })),
+        items: posts.map((post) => toPostResponse(post)),
         totalCount: total,
+      };
+    } catch (error) {
+      this.logger.error(error);
+      throw error;
+    }
+  }
+
+  async getOne(id: string) {
+    try {
+      const post = await this.postRepository.findOneBy({
+        id,
+      });
+
+      if (!post) {
+        throw new AppError('Post not found', HttpStatus.NOT_FOUND);
+      }
+
+      const author = await firstValueFrom(
+        this.usersClient.send('get_user', { id: post.authorId }),
+      );
+
+      return {
+        data: { ...toPostResponse(post), author },
       };
     } catch (error) {
       this.logger.error(error);

@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
+import { CreatePostDto } from './post.dto';
 import { PostService } from './post.service';
 
 @Controller('posts')
@@ -38,7 +39,7 @@ export class PostController {
     @Req() req: Request & any,
     @UploadedFile() file: any,
     @Body()
-    body: any,
+    body: CreatePostDto,
   ) {
     const media = {
       path: file.path,
@@ -52,6 +53,12 @@ export class PostController {
   async getAll(@Query() _query: PaginationParams) {
     const { filter, query } = buildQueryFilter(_query);
     const res = await this.postService.getAll(query, filter);
+    return res;
+  }
+
+  @Get(':id')
+  async getOne(@Param('id') id: string) {
+    const res = await this.postService.getOne(id);
     return res;
   }
 

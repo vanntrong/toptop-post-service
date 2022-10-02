@@ -1,4 +1,6 @@
+import { Post } from '@/models';
 import { BaseQuery } from '@/types/common';
+import { omit } from 'lodash';
 // Delay function
 export async function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,4 +17,8 @@ export const buildQueryFilter = <T>(reqQuery: BaseQuery & T) => {
     filter,
     query: { page, per_page, sort_by, sort_order, q },
   };
+};
+
+export const toPostResponse = (post: Post) => {
+  return omit(post, ['authorId', 'likes']);
 };

@@ -39,8 +39,15 @@ export class Post extends BaseEntity {
   @Column({
     type: 'uuid',
     array: true,
+    default: [],
   })
   likes: string[];
+
+  @Column({
+    type: 'numeric',
+    default: 0,
+  })
+  likesCount: number;
 
   @ManyToMany(() => Hashtag)
   @JoinTable()
